@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventHub | Host Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+      <img src="images/logo.png" class="logo">
+
+      <div class="nav-links">
+        <button onclick="logout()" class="nav-btn">Logout</button>
+      </div>
+    </nav>
+
+    <!-- TITLE -->
+    <h1 class="section-title">Host Dashboard</h1>
+
+    <!-- CREATE EVENT -->
+    <section class="hero">
+      <h2>Create New Event</h2>
+
+      <form id="eventForm">
+
+        <div class="form-group">
+          <label>Event Title</label>
+          <input type="text" id="title" required>
+        </div>
+
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="date" required>
+        </div>
+
+        <div class="form-group">
+          <label>Location</label>
+          <input type="text" id="location" required>
+        </div>
+
+        <div class="form-group">
+          <label>Description</label>
+          <input type="text" id="description" required>
+        </div>
+
+        <button type="submit" class="form-submit">Create Event</button>
+
+      </form>
+
+      <p id="message" class="auth-text"></p>
+    </section>
+
+    <!-- EVENTS LIST -->
+    <section>
+      <h2 class="section-title">Your Events</h2>
+      <div id="eventsContainer" class="cards"></div>
+    </section>
+
+  </div>
+
+  <!-- SCRIPT -->
+  <script>
+    const user = JSON.parse(localStorage.getItem("eventhubUser"));
+
+    // protect page
+    if (!user || (user.role !== "host" && user.role !== "admin")) {
+      window.location.href = "login.html";
+    }
+
+    function logout() {
+      localStorage.removeItem("eventhubUser");
+      window.location.href = "login.html";
+    }
+
+    const form = document.getElementById("eventForm");
+    const message = document.getElementById("message");
+    const container = document.getElementById("eventsContainer");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const title = document.getElementById("title").value;
+      const date = document.getElementById("date").value;
+      const location = document.getElementById("location").value;
+      const description = document.getElementById("description").value;
+
+      try {
+        const res = await fetch("http://localhost:5000/api/events", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            title,
+            date,
+            location,
+            description,
+            createdBy: user.email
+          })
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          message.style.color = "green";
+          message.textContent = "Event created successfully!";
+          form.reset();
+          loadEvents();
+        } else {
+          message.style.color = "red";
+          message.textContent = data.message;
+        }
+
+      } catch (err) {
+        message.style.color = "red";
+        message.textContent = "Server error.";
+      }
+    });
+
+    async function loadEvents() {
+      container.innerHTML = "";
+
+      const res = await fetch("http://localhost:5050/api/events");
+      const events = await res.json();
+
+      const myEvents = events.filter(
+        event => event.createdBy === user.email
+      );
+
+      myEvents.forEach(event => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        card.innerHTML = `
+          <div class="card-image"></div>
+          <div class="card-body">
+            <h3>${event.title}</h3>
+            <p>${event.date} • ${event.location}</p>
+            <p>${event.description}</p>
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    loadEvents();
+  </script>
+
+</body>
+</html>

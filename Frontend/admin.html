@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventHub | Admin Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <nav class="navbar">
+      <img src="images/logo.png" alt="EventHub Logo" class="logo">
+
+      <div class="nav-links">
+        <button onclick="logout()" class="nav-btn">Logout</button>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <h1>Admin Dashboard</h1>
+      <p>Manage users and review all events on EventHub.</p>
+    </section>
+
+    <section>
+      <h2 class="section-title">All Users</h2>
+      <div id="usersContainer" class="cards"></div>
+    </section>
+
+    <section>
+      <h2 class="section-title">All Events</h2>
+      <div id="eventsContainer" class="cards"></div>
+    </section>
+
+    <footer class="footer">
+      <p>EventHub Admin Panel</p>
+    </footer>
+
+  </div>
+
+  <script>
+    const user = JSON.parse(localStorage.getItem("eventhubUser"));
+
+    if (!user || user.role !== "admin") {
+      window.location.href = "login.html";
+    }
+
+    function logout() {
+      localStorage.removeItem("eventhubUser");
+      window.location.href = "login.html";
+    }
+
+    async function loadUsers() {
+      const container = document.getElementById("usersContainer");
+      container.innerHTML = "";
+
+      try {
+        const res = await fetch("http://localhost:5050/api/users");
+        const users = await res.json();
+
+        users.forEach(user => {
+          const card = document.createElement("div");
+          card.className = "card";
+
+          card.innerHTML = `
+            <div class="card-body">
+              <h3>${user.fullname}</h3>
+              <p><strong>Email:</strong> ${user.email}</p>
+              <p><strong>Role:</strong> ${user.role}</p>
+            </div>
+          `;
+
+          container.appendChild(card);
+        });
+      } catch (err) {
+        container.innerHTML = "<p>Could not load users.</p>";
+      }
+    }
+
+    async function loadEvents() {
+      const container = document.getElementById("eventsContainer");
+      container.innerHTML = "";
+
+      try {
+        const res = await fetch("http://localhost:5000/api/events");
+        const events = await res.json();
+
+        events.forEach(event => {
+          const card = document.createElement("div");
+          card.className = "card";
+
+          card.innerHTML = `
+            <div class="card-image"></div>
+            <div class="card-body">
+              <h3>${event.title}</h3>
+              <p><strong>Date:</strong> ${event.date}</p>
+              <p><strong>Location:</strong> ${event.location}</p>
+              <p><strong>Description:</strong> ${event.description}</p>
+              <p><strong>Created By:</strong> ${event.createdBy}</p>
+            </div>
+          `;
+
+          container.appendChild(card);
+        });
+      } catch (err) {
+        container.innerHTML = "<p>Could not load events.</p>";
+      }
+    }
+
+    loadUsers();
+    loadEvents();
+  </script>
+
+</body>
+</html>
