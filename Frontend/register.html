@@ -83,7 +83,7 @@
       const role = document.getElementById("role").value;
 
       try {
-        const res = await fetch("http://10.0.131.199:5050/api/register", {
+        const res = await fetch("/api/register", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"

@@ -91,7 +91,7 @@
       const description = document.getElementById("description").value;
 
       try {
-        const res = await fetch("http://10.0.131.199:5050/api/events", {  // ← fixed: was :5000
+        const res = await fetch("/api/events", {  // ← fixed: was :5000
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -127,7 +127,7 @@
       container.innerHTML = "";
 
       try {
-        const res = await fetch("http://10.0.131.199:5050/api/events");
+        const res = await fetch("/api/events");
         const events = await res.json();
 
         const myEvents = events.filter(
