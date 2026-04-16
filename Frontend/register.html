@@ -41,14 +41,13 @@
           <input type="password" id="confirmPassword" placeholder="Confirm your password" required>
         </div>
 
-        <!-- ROLE SELECT -->
+        <!-- ROLE SELECT — "admin" removed; admin accounts are seeded directly in the DB -->
         <div class="form-group">
           <label>Account Type</label>
           <select id="role" required>
             <option value="">Select account type</option>
             <option value="user">Regular User</option>
             <option value="host">Host</option>
-            <option value="admin">Website Admin</option>
           </select>
         </div>
 
@@ -84,7 +83,7 @@
       const role = document.getElementById("role").value;
 
       try {
-        const res = await fetch("http://localhost:5050/api/register", {
+        const res = await fetch("http://10.0.131.199:5050/api/register", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"

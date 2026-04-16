@@ -57,18 +57,18 @@
       container.innerHTML = "";
 
       try {
-        const res = await fetch("http://localhost:5050/api/users");
+        const res = await fetch("http://10.0.131.199:5050/api/users");  // ← already correct
         const users = await res.json();
 
-        users.forEach(user => {
+        users.forEach(u => {
           const card = document.createElement("div");
           card.className = "card";
 
           card.innerHTML = `
             <div class="card-body">
-              <h3>${user.fullname}</h3>
-              <p><strong>Email:</strong> ${user.email}</p>
-              <p><strong>Role:</strong> ${user.role}</p>
+              <h3>${u.fullname}</h3>
+              <p><strong>Email:</strong> ${u.email}</p>
+              <p><strong>Role:</strong> ${u.role}</p>
             </div>
           `;
 
@@ -84,7 +84,7 @@
       container.innerHTML = "";
 
       try {
-        const res = await fetch("http://localhost:5000/api/events");
+        const res = await fetch("http://10.0.131.199:5050/api/events");  // ← fixed: was :5000
         const events = await res.json();
 
         events.forEach(event => {
