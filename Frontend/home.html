@@ -14,16 +14,15 @@
     <!-- ===== NAVBAR ===== -->
     <nav class="navbar">
       <img src="images/logo.png" alt="EventHub Logo" class="logo">
-
-      <div class="nav-links">
+      <div class="nav-links" id="navLinks">
         <a href="login.html" class="nav-btn">Login</a>
         <a href="register.html" class="primary-btn">Sign Up</a>
       </div>
     </nav>
 
-    <!-- ===== HERO SECTION ===== -->
+    <!-- ===== HERO ===== -->
     <section class="hero">
-      <h1>Welcome to EventHub</h1>
+      <h1 id="heroTitle">Welcome to EventHub</h1>
       <p>Discover and register for events all in one place.</p>
       <a href="#events" class="primary-btn">Browse Events</a>
     </section>
@@ -32,53 +31,262 @@
     <section id="events">
       <h2 class="section-title">Upcoming Events</h2>
 
-      <div class="cards">
+      <div class="search-bar">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search events by name or description...">
+        <input type="text" id="locationFilter" class="search-input" placeholder="Filter by location...">
+      </div>
 
-        <div class="card">
-          <div class="card-image"></div>
-          <div class="card-body">
-            <h3>Music Festival</h3>
-            <p>July 20, 2026 • Newark, NJ</p>
-            <a href="#" class="primary-btn">View Details</a>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-image"></div>
-          <div class="card-body">
-            <h3>Business Conference</h3>
-            <p>August 2, 2026 • Jersey City, NJ</p>
-            <a href="#" class="primary-btn">View Details</a>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-image"></div>
-          <div class="card-body">
-            <h3>Charity Gala</h3>
-            <p>August 18, 2026 • New York, NY</p>
-            <a href="#" class="primary-btn">View Details</a>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-image"></div>
-          <div class="card-body">
-            <h3>Tech Meetup</h3>
-            <p>September 5, 2026 • Hoboken, NJ</p>
-            <a href="#" class="primary-btn">View Details</a>
-          </div>
-        </div>
-
+      <div id="eventsContainer" class="cards">
+        <p>Loading events...</p>
       </div>
     </section>
 
     <!-- ===== FOOTER ===== -->
     <footer class="footer">
-      <p>EventHub © 2026</p>
+      <p>EventHub &copy; 2026</p>
     </footer>
 
   </div>
+
+  <!-- ===== AI CHAT WIDGET ===== -->
+  <button class="chat-fab" id="chatFab" onclick="toggleChat()" title="Ask AI for event recommendations">
+    &#128172;
+  </button>
+
+  <div class="chat-panel hidden" id="chatPanel">
+    <div class="chat-header">
+      <span class="chat-header-title">&#129302; EventHub Assistant</span>
+      <button class="chat-close-btn" onclick="toggleChat()">&#10005;</button>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-bubble assistant-bubble">
+        Hey! I can help you find events you'll love. What kind of event are you looking for? 🎉
+      </div>
+    </div>
+    <div class="chat-input-row">
+      <input type="text" class="chat-text-input" id="chatInput"
+             placeholder="e.g. music events in NYC…"
+             onkeydown="if(event.key==='Enter') sendChat()">
+      <button class="chat-send-btn" id="chatSendBtn" onclick="sendChat()">&#10148;</button>
+    </div>
+  </div>
+
+  <script>
+    const user = JSON.parse(localStorage.getItem("eventhubUser"));
+    let allEvents = [];
+    let userAttendance = [];
+
+    function escapeHTML(str) {
+      const d = document.createElement("div");
+      d.textContent = String(str);
+      return d.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+      const d = new Date(dateStr + "T00:00:00");
+      return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    }
+
+    function logout() {
+      localStorage.removeItem("eventhubUser");
+      window.location.href = "home.html";
+    }
+
+    function updateNavbar() {
+      if (!user) return;
+      const firstName = escapeHTML(user.fullname.split(" ")[0]);
+      let html = `<span class="nav-greeting">Hey, ${firstName}!</span>`;
+
+      if (user.role === "user") {
+        html += `<a href="myevents.html" class="nav-btn">My Events</a>`;
+      } else if (user.role === "host") {
+        html += `<a href="host.html" class="nav-btn">Dashboard</a>`;
+      } else if (user.role === "admin") {
+        html += `<a href="admin.html" class="nav-btn">Dashboard</a>`;
+      }
+
+      html += `<button onclick="logout()" class="nav-btn">Logout</button>`;
+      document.getElementById("navLinks").innerHTML = html;
+
+      const firstName2 = user.fullname.split(" ")[0];
+      document.getElementById("heroTitle").textContent = `Hey, ${firstName2}! Welcome to EventHub`;
+    }
+
+    function renderEvents() {
+      const container = document.getElementById("eventsContainer");
+      const searchVal   = document.getElementById("searchInput").value.toLowerCase().trim();
+      const locationVal = document.getElementById("locationFilter").value.toLowerCase().trim();
+
+      const filtered = allEvents.filter(e => {
+        const matchSearch   = !searchVal   || e.title.toLowerCase().includes(searchVal) || e.description.toLowerCase().includes(searchVal);
+        const matchLocation = !locationVal || e.location.toLowerCase().includes(locationVal);
+        return matchSearch && matchLocation;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = "<p>No events found.</p>";
+        return;
+      }
+
+      container.innerHTML = "";
+      filtered.forEach(event => {
+        const isAttending = userAttendance.includes(event.id);
+        const isCancelled = event.status === "cancelled";
+        const isPostponed = event.status === "postponed";
+
+        let badge = "";
+        if (isCancelled) badge = `<span class="badge badge-cancelled">Cancelled</span>`;
+        else if (isPostponed) badge = `<span class="badge badge-postponed">Postponed</span>`;
+
+        let attendBtn = "";
+        if (user && user.role === "user" && !isCancelled) {
+          if (isAttending) {
+            attendBtn = `<button class="attending-btn attend-btn" onclick="toggleAttend(${event.id}, true)">&#10003; Attending</button>`;
+          } else {
+            attendBtn = `<button class="primary-btn attend-btn" onclick="toggleAttend(${event.id}, false)">Attend</button>`;
+          }
+        }
+
+        const shortDesc = escapeHTML(event.description).length > 80
+          ? escapeHTML(event.description).substring(0, 80) + "…"
+          : escapeHTML(event.description);
+
+        const card = document.createElement("div");
+        card.className = "card" + (isCancelled ? " card-cancelled" : "");
+        card.innerHTML = `
+          <div class="card-image"></div>
+          <div class="card-body">
+            ${badge}
+            <h3>${escapeHTML(event.title)}</h3>
+            <p>${formatDate(event.date)} &bull; ${escapeHTML(event.location)}</p>
+            <p>${shortDesc}</p>
+            <div class="card-actions">
+              <a href="event.html?id=${event.id}" class="secondary-btn" style="padding:9px 18px;font-size:0.9rem;">View Details</a>
+              ${attendBtn ? `<span style="flex:1;">${attendBtn}</span>` : ""}
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function toggleAttend(eventId, isCurrentlyAttending) {
+      try {
+        await fetch("/api/attendance", {
+          method: isCurrentlyAttending ? "DELETE" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId, userId: user.id })
+        });
+
+        if (isCurrentlyAttending) {
+          userAttendance = userAttendance.filter(id => id !== eventId);
+        } else {
+          userAttendance.push(eventId);
+        }
+        renderEvents();
+      } catch {
+        alert("Could not update attendance. Please try again.");
+      }
+    }
+
+    async function loadEvents() {
+      try {
+        const res = await fetch("/api/events");
+        allEvents = await res.json();
+
+        if (user && user.role === "user") {
+          const attRes = await fetch(`/api/attendance?userId=${user.id}`);
+          userAttendance = await attRes.json();
+        }
+
+        renderEvents();
+      } catch {
+        document.getElementById("eventsContainer").innerHTML = "<p>Could not load events.</p>";
+      }
+    }
+
+    document.getElementById("searchInput").addEventListener("input", renderEvents);
+    document.getElementById("locationFilter").addEventListener("input", renderEvents);
+
+    updateNavbar();
+    loadEvents();
+
+    // ── AI Chat Widget ────────────────────────────────────────────────────────
+    let chatOpen    = false;
+    let chatHistory = [];   // [{role, content}] sent to backend for context
+
+    function toggleChat() {
+      chatOpen = !chatOpen;
+      document.getElementById("chatPanel").classList.toggle("hidden", !chatOpen);
+      if (chatOpen) document.getElementById("chatInput").focus();
+    }
+
+    function appendBubble(text, role) {
+      const messages = document.getElementById("chatMessages");
+      const div = document.createElement("div");
+      div.className = `chat-bubble ${role === "user" ? "user-bubble" : "assistant-bubble"}`;
+      div.textContent = text;
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+      return div;
+    }
+
+    function showTyping() {
+      const messages = document.getElementById("chatMessages");
+      const div = document.createElement("div");
+      div.className = "chat-bubble typing-bubble";
+      div.id = "typingIndicator";
+      div.textContent = "Assistant is typing…";
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function removeTyping() {
+      const el = document.getElementById("typingIndicator");
+      if (el) el.remove();
+    }
+
+    async function sendChat() {
+      const input   = document.getElementById("chatInput");
+      const sendBtn = document.getElementById("chatSendBtn");
+      const message = input.value.trim();
+      if (!message) return;
+
+      input.value   = "";
+      input.disabled = true;
+      sendBtn.disabled = true;
+
+      appendBubble(message, "user");
+      showTyping();
+
+      try {
+        const res  = await fetch("/api/ai/chat", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ message, history: chatHistory })
+        });
+        const data = await res.json();
+        removeTyping();
+
+        const reply = res.ok ? data.reply : (data.message || "Sorry, I couldn't respond right now.");
+        appendBubble(reply, "assistant");
+
+        if (res.ok) {
+          // Keep rolling history for multi-turn conversation (cap at 10)
+          chatHistory.push({ role: "user",      content: message });
+          chatHistory.push({ role: "assistant", content: reply   });
+          chatHistory = chatHistory.slice(-10);
+        }
+      } catch {
+        removeTyping();
+        appendBubble("Couldn't reach the assistant. Please try again.", "assistant");
+      }
+
+      input.disabled  = false;
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  </script>
 
 </body>
 </html>

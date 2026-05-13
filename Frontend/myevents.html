@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventHub | My Events</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <!-- ===== NAVBAR ===== -->
+    <nav class="navbar">
+      <img src="images/logo.png" alt="EventHub Logo" class="logo">
+      <div class="nav-links">
+        <span class="nav-greeting" id="greetingText"></span>
+        <a href="home.html" class="nav-btn">Browse Events</a>
+        <button onclick="logout()" class="nav-btn">Logout</button>
+      </div>
+    </nav>
+
+    <!-- ===== TITLE ===== -->
+    <h1 class="section-title">My Events</h1>
+
+    <!-- ===== EVENTS ===== -->
+    <section>
+      <div id="myEventsContainer" class="cards">
+        <p>Loading your events...</p>
+      </div>
+    </section>
+
+    <!-- ===== FOOTER ===== -->
+    <footer class="footer">
+      <p>EventHub &copy; 2026</p>
+    </footer>
+
+  </div>
+
+  <script>
+    const user = JSON.parse(localStorage.getItem("eventhubUser"));
+
+    if (!user || user.role !== "user") {
+      window.location.href = "login.html";
+    }
+
+    document.getElementById("greetingText").textContent = `Hey, ${user.fullname.split(" ")[0]}!`;
+
+    function logout() {
+      localStorage.removeItem("eventhubUser");
+      window.location.href = "login.html";
+    }
+
+    function escapeHTML(str) {
+      const d = document.createElement("div");
+      d.textContent = String(str);
+      return d.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+      const d = new Date(dateStr + "T00:00:00");
+      return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    }
+
+    async function loadMyEvents() {
+      const container = document.getElementById("myEventsContainer");
+      try {
+        const [attRes, eventsRes] = await Promise.all([
+          fetch(`/api/attendance?userId=${user.id}`),
+          fetch("/api/events")
+        ]);
+
+        const attendedIds = await attRes.json();
+        const allEvents   = await eventsRes.json();
+        const myEvents    = allEvents.filter(e => attendedIds.includes(e.id));
+
+        if (myEvents.length === 0) {
+          container.innerHTML = `<p>You haven't registered for any events yet. <a href="home.html" style="color:#e4574f;font-weight:bold;">Browse events</a></p>`;
+          return;
+        }
+
+        container.innerHTML = "";
+        myEvents.forEach(event => {
+          const isCancelled = event.status === "cancelled";
+          const isPostponed = event.status === "postponed";
+
+          let badge = "";
+          if (isCancelled) badge = `<span class="badge badge-cancelled">Cancelled</span>`;
+          else if (isPostponed) badge = `<span class="badge badge-postponed">Postponed</span>`;
+
+          const card = document.createElement("div");
+          card.className = "card" + (isCancelled ? " card-cancelled" : "");
+          card.innerHTML = `
+            <div class="card-image"></div>
+            <div class="card-body">
+              ${badge}
+              <h3>${escapeHTML(event.title)}</h3>
+              <p>${formatDate(event.date)} &bull; ${escapeHTML(event.location)}</p>
+              <p>${escapeHTML(event.description)}</p>
+              <div class="card-actions">
+                <a href="event.html?id=${event.id}" class="secondary-btn" style="padding:9px 18px;font-size:0.9rem;">View Details</a>
+                ${!isCancelled
+                  ? `<button class="danger-btn" onclick="removeRsvp(${event.id}, this)">Remove RSVP</button>`
+                  : ""}
+              </div>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch {
+        container.innerHTML = "<p>Could not load your events.</p>";
+      }
+    }
+
+    async function removeRsvp(eventId, btn) {
+      btn.disabled = true;
+      btn.textContent = "Removing...";
+      try {
+        await fetch("/api/attendance", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId, userId: user.id })
+        });
+        loadMyEvents();
+      } catch {
+        btn.disabled = false;
+        btn.textContent = "Remove RSVP";
+        alert("Could not remove RSVP. Please try again.");
+      }
+    }
+
+    loadMyEvents();
+  </script>
+
+</body>
+</html>

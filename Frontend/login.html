@@ -51,7 +51,7 @@
       const password = document.getElementById("password").value;
 
       try {
-        const res = await fetch("http://localhost:5050/api/login", {
+        const res = await fetch("/api/login", {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -66,19 +66,10 @@
 
         if (res.ok) {
           message.style.color = "green";
-          message.textContent = "Login successful! Redirecting...";
-
-          localStorage.setItem("eventhubUser", JSON.stringify(data.user));
-
+          message.textContent = "Code sent! Check your email.";
           setTimeout(() => {
-            if (data.user.role === "admin") {
-              window.location.href = "admin.html";
-            } else if (data.user.role === "host") {
-              window.location.href = "host.html";
-            } else {
-              window.location.href = "home.html";
-            }
-          }, 1500);
+            window.location.href = `verify.html?userId=${data.userId}`;
+          }, 1000);
         } else {
           message.style.color = "red";
           message.textContent = data.message;

@@ -11,33 +11,51 @@
 
   <div class="container">
 
+    <!-- ===== NAVBAR ===== -->
     <nav class="navbar">
       <img src="images/logo.png" alt="EventHub Logo" class="logo">
-
       <div class="nav-links">
+        <span class="nav-greeting" id="greetingText"></span>
         <button onclick="logout()" class="nav-btn">Logout</button>
       </div>
     </nav>
 
+    <!-- ===== HERO ===== -->
     <section class="hero">
       <h1>Admin Dashboard</h1>
       <p>Manage users and review all events on EventHub.</p>
     </section>
 
+    <!-- ===== USERS ===== -->
     <section>
       <h2 class="section-title">All Users</h2>
       <div id="usersContainer" class="cards"></div>
     </section>
 
+    <!-- ===== EVENTS ===== -->
     <section>
       <h2 class="section-title">All Events</h2>
       <div id="eventsContainer" class="cards"></div>
     </section>
 
+    <!-- ===== FOOTER ===== -->
     <footer class="footer">
       <p>EventHub Admin Panel</p>
     </footer>
 
+  </div>
+
+  <!-- ===== POSTPONE MODAL ===== -->
+  <div id="postponeModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>Postpone Event</h3>
+      <p>Select a new date for this event:</p>
+      <input type="date" id="postponeDate">
+      <div class="modal-actions">
+        <button onclick="confirmPostpone()" class="primary-btn">Confirm</button>
+        <button onclick="closeModal()" class="nav-btn">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -47,65 +65,158 @@
       window.location.href = "login.html";
     }
 
+    document.getElementById("greetingText").textContent = `Hey, ${user.fullname.split(" ")[0]}!`;
+
     function logout() {
       localStorage.removeItem("eventhubUser");
       window.location.href = "login.html";
     }
 
+    function escapeHTML(str) {
+      const d = document.createElement("div");
+      d.textContent = String(str);
+      return d.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+      const d = new Date(dateStr + "T00:00:00");
+      return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    }
+
+    // ── Load Users ────────────────────────────────────────────────────────────
     async function loadUsers() {
       const container = document.getElementById("usersContainer");
       container.innerHTML = "";
 
       try {
-        const res = await fetch("http://localhost:5050/api/users");
+        const res   = await fetch("/api/users");
         const users = await res.json();
 
-        users.forEach(user => {
+        users.forEach(u => {
           const card = document.createElement("div");
           card.className = "card";
-
           card.innerHTML = `
             <div class="card-body">
-              <h3>${user.fullname}</h3>
-              <p><strong>Email:</strong> ${user.email}</p>
-              <p><strong>Role:</strong> ${user.role}</p>
+              <h3>${escapeHTML(u.fullname)}</h3>
+              <p><strong>Email:</strong> ${escapeHTML(u.email)}</p>
+              <p><strong>Role:</strong> ${escapeHTML(u.role)}</p>
             </div>
           `;
-
           container.appendChild(card);
         });
-      } catch (err) {
+      } catch {
         container.innerHTML = "<p>Could not load users.</p>";
       }
     }
 
+    // ── Load Events ───────────────────────────────────────────────────────────
     async function loadEvents() {
       const container = document.getElementById("eventsContainer");
       container.innerHTML = "";
 
       try {
-        const res = await fetch("http://localhost:5000/api/events");
+        const res    = await fetch("/api/events");
         const events = await res.json();
 
         events.forEach(event => {
-          const card = document.createElement("div");
-          card.className = "card";
+          const isCancelled = event.status === "cancelled";
+          const isPostponed = event.status === "postponed";
 
-          card.innerHTML = `
-            <div class="card-image"></div>
-            <div class="card-body">
-              <h3>${event.title}</h3>
-              <p><strong>Date:</strong> ${event.date}</p>
-              <p><strong>Location:</strong> ${event.location}</p>
-              <p><strong>Description:</strong> ${event.description}</p>
-              <p><strong>Created By:</strong> ${event.createdBy}</p>
+          let badge = "";
+          if (isCancelled) badge = `<span class="badge badge-cancelled">Cancelled</span>`;
+          else if (isPostponed) badge = `<span class="badge badge-postponed">Postponed</span>`;
+          else badge = `<span class="badge badge-active">Active</span>`;
+
+          let actions = `
+            <div class="card-actions">
+              <a href="event.html?id=${event.id}" class="secondary-btn" style="padding:9px 18px;font-size:0.9rem;">View Details</a>
+              ${!isCancelled ? `
+                <button class="warning-btn" onclick="openPostponeModal(${event.id})">Postpone</button>
+                <button class="danger-btn"  onclick="cancelEvent(${event.id})">Cancel</button>
+              ` : ""}
             </div>
           `;
 
+          const card = document.createElement("div");
+          card.className = "card" + (isCancelled ? " card-cancelled" : "");
+          card.innerHTML = `
+            <div class="card-image"></div>
+            <div class="card-body">
+              ${badge}
+              <h3>${escapeHTML(event.title)}</h3>
+              <p><strong>Date:</strong> ${formatDate(event.date)}</p>
+              <p><strong>Location:</strong> ${escapeHTML(event.location)}</p>
+              <p><strong>Description:</strong> ${escapeHTML(event.description)}</p>
+              <p><strong>Created by:</strong> ${escapeHTML(event.createdBy)}</p>
+              ${actions}
+            </div>
+          `;
           container.appendChild(card);
         });
-      } catch (err) {
+      } catch {
         container.innerHTML = "<p>Could not load events.</p>";
+      }
+    }
+
+    // ── Postpone Modal ────────────────────────────────────────────────────────
+    let currentEventId = null;
+
+    function openPostponeModal(eventId) {
+      currentEventId = eventId;
+      document.getElementById("postponeDate").value = "";
+      document.getElementById("postponeModal").style.display = "flex";
+    }
+
+    function closeModal() {
+      document.getElementById("postponeModal").style.display = "none";
+      currentEventId = null;
+    }
+
+    async function confirmPostpone() {
+      const newDate = document.getElementById("postponeDate").value;
+      if (!newDate) {
+        alert("Please select a new date.");
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/events/${currentEventId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "postpone", newDate })
+        });
+
+        if (res.ok) {
+          closeModal();
+          loadEvents();
+        } else {
+          const data = await res.json();
+          alert(data.message || "Could not postpone event.");
+        }
+      } catch {
+        alert("Server error. Please try again.");
+      }
+    }
+
+    // ── Cancel Event ──────────────────────────────────────────────────────────
+    async function cancelEvent(eventId) {
+      if (!confirm("Are you sure you want to cancel this event? This cannot be undone.")) return;
+
+      try {
+        const res = await fetch(`/api/events/${eventId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "cancel" })
+        });
+
+        if (res.ok) {
+          loadEvents();
+        } else {
+          const data = await res.json();
+          alert(data.message || "Could not cancel event.");
+        }
+      } catch {
+        alert("Server error. Please try again.");
       }
     }
 

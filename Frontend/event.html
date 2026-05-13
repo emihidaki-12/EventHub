@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventHub | Event Details</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <!-- ===== NAVBAR ===== -->
+    <nav class="navbar">
+      <img src="images/logo.png" alt="EventHub Logo" class="logo">
+      <div class="nav-links" id="navLinks">
+        <a href="home.html" class="nav-btn">Browse Events</a>
+        <a href="login.html" class="primary-btn">Login</a>
+      </div>
+    </nav>
+
+    <!-- ===== CONTENT ===== -->
+    <div id="eventContent">
+      <p style="text-align:center; color:#7a5a58; padding: 60px 0;">Loading event...</p>
+    </div>
+
+    <!-- ===== FOOTER ===== -->
+    <footer class="footer">
+      <p>EventHub &copy; 2026</p>
+    </footer>
+
+  </div>
+
+  <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    // CONFIGURATION — paste your Google Maps API key here
+    // Get one at: https://console.cloud.google.com/
+    // Enable: "Maps Embed API" for the key to work
+    // ─────────────────────────────────────────────────────────────────────────
+    const GOOGLE_MAPS_API_KEY = "AIzaSyCag8oRxtXQdShIzkwGTQpJnvfo9JK50Fk";
+
+    const user      = JSON.parse(localStorage.getItem("eventhubUser"));
+    const eventId   = parseInt(new URLSearchParams(window.location.search).get("id"));
+    let   attending = false;
+
+    if (!eventId) window.location.href = "home.html";
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function escapeHTML(str) {
+      const d = document.createElement("div");
+      d.textContent = String(str);
+      return d.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+      const d = new Date(dateStr + "T00:00:00");
+      return d.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+    }
+
+    // Builds the Google Calendar "Add to Calendar" link (no API key needed)
+    function buildCalendarLink(event) {
+      const start = event.date.replace(/-/g, "");
+      const endDate = new Date(event.date + "T00:00:00");
+      endDate.setDate(endDate.getDate() + 1);
+      const end = [
+        endDate.getFullYear(),
+        String(endDate.getMonth() + 1).padStart(2, "0"),
+        String(endDate.getDate()).padStart(2, "0")
+      ].join("");
+
+      const params = new URLSearchParams({
+        action:  "TEMPLATE",
+        text:    event.title,
+        dates:   `${start}/${end}`,
+        details: event.description,
+        location: event.location,
+        sf: "true",
+        output: "xml"
+      });
+      return `https://calendar.google.com/calendar/render?${params}`;
+    }
+
+    // ── Navbar ────────────────────────────────────────────────────────────────
+    function updateNavbar() {
+      if (!user) return;
+      const firstName = escapeHTML(user.fullname.split(" ")[0]);
+      let html = `<span class="nav-greeting">Hey, ${firstName}!</span>`;
+
+      if (user.role === "user") {
+        html += `<a href="myevents.html" class="nav-btn">My Events</a>`;
+      } else if (user.role === "host") {
+        html += `<a href="host.html" class="nav-btn">Dashboard</a>`;
+      } else if (user.role === "admin") {
+        html += `<a href="admin.html" class="nav-btn">Dashboard</a>`;
+      }
+
+      html += `<a href="home.html" class="nav-btn">Browse Events</a>`;
+      html += `<button onclick="logout()" class="nav-btn">Logout</button>`;
+      document.getElementById("navLinks").innerHTML = html;
+    }
+
+    function logout() {
+      localStorage.removeItem("eventhubUser");
+      window.location.href = "login.html";
+    }
+
+    // ── Render Event ──────────────────────────────────────────────────────────
+    function renderEvent(event) {
+      const isCancelled = event.status === "cancelled";
+      const isPostponed = event.status === "postponed";
+
+      let badge = "";
+      if (isCancelled) badge = `<span class="badge badge-cancelled">Cancelled</span>`;
+      else if (isPostponed) badge = `<span class="badge badge-postponed">Postponed</span>`;
+
+      // Google Maps embed or fallback link
+      const encodedLocation = encodeURIComponent(event.location);
+      let mapSection = "";
+      if (GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== "YOUR_GOOGLE_MAPS_API_KEY") {
+        mapSection = `
+          <div class="event-map-container">
+            <iframe
+              src="https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodedLocation}"
+              allowfullscreen
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade">
+            </iframe>
+          </div>
+        `;
+      } else {
+        mapSection = `
+          <div class="event-map-container">
+            <div class="map-fallback">
+              <span style="font-size:2rem;">&#128205;</span>
+              <span>${escapeHTML(event.location)}</span>
+              <a href="https://www.google.com/maps/search/?api=1&query=${encodedLocation}"
+                 target="_blank" rel="noopener" class="primary-btn" style="font-size:0.9rem;padding:10px 20px;">
+                View on Google Maps
+              </a>
+            </div>
+          </div>
+        `;
+      }
+
+      // Attend button — only for regular users on non-cancelled events
+      let attendBtn = "";
+      if (user && user.role === "user" && !isCancelled) {
+        if (attending) {
+          attendBtn = `<button class="attending-btn" id="attendBtn" onclick="toggleAttend()" style="padding:12px 28px;width:auto;">&#10003; Attending</button>`;
+        } else {
+          attendBtn = `<button class="primary-btn" id="attendBtn" onclick="toggleAttend()" style="padding:12px 28px;">Attend this event</button>`;
+        }
+      }
+
+      const calLink = buildCalendarLink(event);
+
+      // AI Summary section — show cached summary or a generate button
+      const aiSection = event.ai_summary
+        ? `<div class="ai-summary-card">
+             <div class="ai-summary-header">
+               <span class="ai-summary-label">&#10024; AI Summary</span>
+               <span class="ai-badge">AI Generated</span>
+             </div>
+             <p class="ai-summary-text">${escapeHTML(event.ai_summary)}</p>
+           </div>`
+        : `<div class="ai-summary-card">
+             <div class="ai-summary-header">
+               <span class="ai-summary-label">&#10024; AI Summary</span>
+               <button class="ai-generate-btn" id="summaryBtn" onclick="generateSummary()">
+                 Generate
+               </button>
+             </div>
+             <div id="summaryContent">
+               <p class="ai-summary-placeholder">
+                 Get a quick AI-powered overview of this event with one click.
+               </p>
+             </div>
+           </div>`;
+
+      document.getElementById("eventContent").innerHTML = `
+        <a href="home.html" class="back-link">&#8592; Back to Events</a>
+
+        <div class="event-detail">
+          ${badge}
+          <h1>${escapeHTML(event.title)}</h1>
+
+          <div class="event-meta">
+            <strong>&#128197; Date:</strong> ${formatDate(event.date)}<br>
+            <strong>&#128205; Location:</strong> ${escapeHTML(event.location)}<br>
+            <strong>&#128100; Hosted by:</strong> ${escapeHTML(event.createdBy)}
+          </div>
+
+          <p class="event-description">${escapeHTML(event.description)}</p>
+
+          ${aiSection}
+
+          ${mapSection}
+
+          <div class="event-actions">
+            <a href="${calLink}" target="_blank" rel="noopener" class="gcal-btn">
+              &#128197; Add to Google Calendar
+            </a>
+            ${attendBtn}
+          </div>
+        </div>
+      `;
+    }
+
+    // ── AI Summary ────────────────────────────────────────────────────────────
+    async function generateSummary() {
+      const btn     = document.getElementById("summaryBtn");
+      const content = document.getElementById("summaryContent");
+      btn.disabled      = true;
+      btn.textContent   = "Generating…";
+      content.innerHTML = `<p class="ai-summary-placeholder">✨ Writing summary…</p>`;
+
+      try {
+        const res  = await fetch(`/api/events/${eventId}/summary`);
+        const data = await res.json();
+
+        if (res.ok) {
+          // Swap button for badge, show text
+          btn.closest(".ai-summary-header").innerHTML =
+            `<span class="ai-summary-label">&#10024; AI Summary</span>
+             <span class="ai-badge">AI Generated</span>`;
+          content.innerHTML = `<p class="ai-summary-text">${escapeHTML(data.summary)}</p>`;
+        } else {
+          content.innerHTML = `<p style="color:#e4574f;font-size:0.9rem;">${escapeHTML(data.message)}</p>`;
+          btn.textContent = "Try Again";
+          btn.disabled    = false;
+        }
+      } catch {
+        content.innerHTML = `<p style="color:#e4574f;font-size:0.9rem;">Server error. Please try again.</p>`;
+        btn.textContent = "Try Again";
+        btn.disabled    = false;
+      }
+    }
+
+    // ── Attend Toggle ─────────────────────────────────────────────────────────
+    async function toggleAttend() {
+      const btn = document.getElementById("attendBtn");
+      if (!btn) return;
+      btn.disabled = true;
+
+      try {
+        await fetch("/api/attendance", {
+          method: attending ? "DELETE" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId, userId: user.id })
+        });
+        attending = !attending;
+        // Re-render just the button without a full reload
+        if (attending) {
+          btn.className = "attending-btn";
+          btn.textContent = "✓ Attending";
+          btn.style.cssText = "padding:12px 28px;width:auto;";
+        } else {
+          btn.className = "primary-btn";
+          btn.textContent = "Attend this event";
+          btn.style.cssText = "padding:12px 28px;";
+        }
+      } catch {
+        alert("Could not update attendance. Please try again.");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── Load ──────────────────────────────────────────────────────────────────
+    async function loadEvent() {
+      try {
+        const res = await fetch(`/api/events/${eventId}`);
+        if (!res.ok) throw new Error("not found");
+        const event = await res.json();
+
+        // Check attendance for regular users
+        if (user && user.role === "user") {
+          const attRes = await fetch(`/api/attendance?userId=${user.id}`);
+          const ids    = await attRes.json();
+          attending = ids.includes(eventId);
+        }
+
+        document.title = `EventHub | ${event.title}`;
+        renderEvent(event);
+      } catch {
+        document.getElementById("eventContent").innerHTML =
+          `<p style="text-align:center;padding:60px 0;color:#7a5a58;">
+            Event not found. <a href="home.html" style="color:#e4574f;font-weight:bold;">Back to events</a>
+          </p>`;
+      }
+    }
+
+    updateNavbar();
+    loadEvent();
+  </script>
+
+</body>
+</html>

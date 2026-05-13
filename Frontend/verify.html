@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventHub | Verify Your Identity</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <div class="auth-wrapper">
+    <div class="auth-card">
+
+      <img src="images/logo.png" alt="EventHub Logo" class="auth-logo">
+
+      <h1>Check your email</h1>
+      <p class="auth-text" style="margin-top:0;margin-bottom:4px;">
+        We sent a 6-digit code to your email address.<br>Enter it below to sign in.
+      </p>
+
+      <!-- OTP Boxes -->
+      <div class="otp-boxes" id="otpBoxes">
+        <input class="otp-box" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+        <input class="otp-box" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+        <input class="otp-box" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+        <input class="otp-box" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+        <input class="otp-box" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+        <input class="otp-box" type="text" inputmode="numeric" maxlength="1" autocomplete="off">
+      </div>
+
+      <p class="otp-timer" id="timer">Code expires in 10:00</p>
+
+      <button id="submitBtn" class="form-submit" style="margin-top:16px;" onclick="submitOTP()">
+        Verify
+      </button>
+
+      <p id="message" class="auth-text"></p>
+
+      <p class="auth-text" style="margin-top:12px;">
+        Didn't receive the code?
+        <button class="resend-btn" id="resendBtn" onclick="resendCode()">Resend</button>
+      </p>
+
+      <p class="auth-text" style="margin-top:6px;">
+        <a href="login.html" style="color:#7a5a58;font-size:0.9rem;">&#8592; Back to login</a>
+      </p>
+
+    </div>
+  </div>
+
+  <script>
+    // ── Guard: must have a userId in the URL ──────────────────────────────────
+    const userId = parseInt(new URLSearchParams(window.location.search).get("userId"));
+    if (!userId) window.location.href = "login.html";
+
+    // ── OTP Box Logic ─────────────────────────────────────────────────────────
+    const boxes     = Array.from(document.querySelectorAll(".otp-box"));
+    const submitBtn = document.getElementById("submitBtn");
+    const message   = document.getElementById("message");
+
+    boxes.forEach((box, i) => {
+      box.addEventListener("input", () => {
+        // Strip non-digits and keep only one char
+        box.value = box.value.replace(/\D/g, "").slice(-1);
+        box.classList.toggle("filled", box.value !== "");
+
+        if (box.value && i < boxes.length - 1) {
+          boxes[i + 1].focus();
+        }
+        if (boxes.every(b => b.value)) {
+          submitOTP();
+        }
+      });
+
+      box.addEventListener("keydown", (e) => {
+        if (e.key === "Backspace" && !box.value && i > 0) {
+          boxes[i - 1].focus();
+          boxes[i - 1].value = "";
+          boxes[i - 1].classList.remove("filled");
+        }
+      });
+
+      // Handle paste — works whether pasted into any box
+      box.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const digits = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+        digits.split("").forEach((ch, j) => {
+          if (boxes[j]) {
+            boxes[j].value = ch;
+            boxes[j].classList.add("filled");
+          }
+        });
+        const nextEmpty = boxes.find(b => !b.value);
+        (nextEmpty || boxes[boxes.length - 1]).focus();
+        if (digits.length === 6) submitOTP();
+      });
+    });
+
+    boxes[0].focus();
+
+    function getOTP() {
+      return boxes.map(b => b.value).join("");
+    }
+
+    // ── Submit OTP ────────────────────────────────────────────────────────────
+    async function submitOTP() {
+      const code = getOTP();
+      if (code.length < 6) {
+        message.style.color = "red";
+        message.textContent = "Please enter all 6 digits.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Verifying...";
+      message.textContent = "";
+
+      try {
+        const res  = await fetch("/api/verify-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, token: code })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          message.style.color = "green";
+          message.textContent = "Verified! Redirecting...";
+          clearInterval(timerInterval);
+
+          localStorage.setItem("eventhubUser", JSON.stringify(data.user));
+
+          setTimeout(() => {
+            const role = data.user.role;
+            if (role === "admin")     window.location.href = "admin.html";
+            else if (role === "host") window.location.href = "host.html";
+            else                      window.location.href = "home.html";
+          }, 1000);
+        } else {
+          message.style.color = "red";
+          message.textContent = data.message;
+          // Clear boxes so user can re-enter
+          boxes.forEach(b => { b.value = ""; b.classList.remove("filled"); });
+          boxes[0].focus();
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Verify";
+        }
+      } catch {
+        message.style.color = "red";
+        message.textContent = "Server error. Please try again.";
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Verify";
+      }
+    }
+
+    // ── Countdown Timer ───────────────────────────────────────────────────────
+    const timerEl  = document.getElementById("timer");
+    let   timeLeft = 600; // 10 minutes
+
+    const timerInterval = setInterval(() => {
+      timeLeft--;
+      const min = Math.floor(timeLeft / 60);
+      const sec = timeLeft % 60;
+      timerEl.textContent = `Code expires in ${min}:${String(sec).padStart(2, "0")}`;
+
+      if (timeLeft <= 60) timerEl.classList.add("expiring");
+
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        timerEl.textContent = "Code expired. Please request a new one.";
+        submitBtn.disabled = true;
+        boxes.forEach(b => b.disabled = true);
+      }
+    }, 1000);
+
+    // ── Resend Code ───────────────────────────────────────────────────────────
+    const resendBtn = document.getElementById("resendBtn");
+    let   resendCooldown = 0;
+
+    async function resendCode() {
+      if (resendCooldown > 0) return;
+
+      resendBtn.disabled = true;
+      message.textContent = "";
+
+      try {
+        const res  = await fetch("/api/resend-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          message.style.color = "green";
+          message.textContent = "New code sent! Check your email.";
+          // Reset timer
+          timeLeft = 600;
+          timerEl.classList.remove("expiring");
+          submitBtn.disabled = false;
+          boxes.forEach(b => { b.disabled = false; b.value = ""; b.classList.remove("filled"); });
+          boxes[0].focus();
+          // 30-second cooldown on Resend button
+          resendCooldown = 30;
+          const cooldownInterval = setInterval(() => {
+            resendCooldown--;
+            resendBtn.textContent = resendCooldown > 0 ? `Resend (${resendCooldown}s)` : "Resend";
+            if (resendCooldown <= 0) {
+              clearInterval(cooldownInterval);
+              resendBtn.disabled = false;
+            }
+          }, 1000);
+        } else {
+          message.style.color = "red";
+          message.textContent = data.message;
+          resendBtn.disabled = false;
+        }
+      } catch {
+        message.style.color = "red";
+        message.textContent = "Server error. Please try again.";
+        resendBtn.disabled = false;
+      }
+    }
+  </script>
+
+</body>
+</html>
