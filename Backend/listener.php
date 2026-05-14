@@ -35,9 +35,28 @@ function getBody() {
     return json_decode(file_get_contents("php://input"), true) ?? [];
 }
 
+// ── Logger ───────────────────────────────────────────────────────────────────
+function logEvent($level, $message, $context = []) {
+    $ts  = date('Y-m-d H:i:s');
+    $ctx = $context ? ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE) : '';
+    $ip  = $_SERVER['REMOTE_ADDR'] ?? '-';
+    $line = "[{$ts}] [{$level}] [{$ip}] {$message}{$ctx}" . PHP_EOL;
+
+    // Try /var/log/eventhub.log; fall back to the project root
+    $logFile = '/var/log/eventhub.log';
+    if (!is_writable(dirname($logFile))) {
+        $logFile = __DIR__ . '/../eventhub.log';
+    }
+
+    file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+}
+
 // ── Router ──────────────────────────────────────────────────────────────────
 $method = $_SERVER['REQUEST_METHOD'];
 $path   = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+
+// Log every incoming API request
+logEvent('REQUEST', "{$method} /{$path}");
 
 switch (true) {
 
@@ -75,6 +94,11 @@ switch (true) {
 
     case (bool)preg_match('/^api\/events\/(\d+)$/', $path, $m) && $method === 'PUT':
         handleUpdateEvent((int)$m[1]);
+        break;
+
+    // POST /api/events/{id}/image  (upload event banner image)
+    case (bool)preg_match('/^api\/events\/(\d+)\/image$/', $path, $m) && $method === 'POST':
+        handleUploadImage((int)$m[1]);
         break;
 
     // GET /api/events/{id}/summary  (AI-generated event summary)
@@ -149,9 +173,11 @@ function handleRegister() {
     $stmt->bind_param("ssss", $fullname, $email, $hashed, $role);
 
     if ($stmt->execute()) {
+        logEvent('INFO', 'User registered', ['email' => $email, 'role' => $role]);
         $stmt->close(); $db->close();
         respond(201, ["message" => "Registration successful."]);
     } else {
+        logEvent('ERROR', 'Registration DB insert failed', ['email' => $email]);
         $stmt->close(); $db->close();
         respond(500, ["message" => "Could not create account. Please try again."]);
     }
@@ -175,6 +201,7 @@ function handleLogin() {
     $result = $stmt->get_result();
 
     if ($result->num_rows === 0) {
+        logEvent('WARNING', 'Login failed — email not found', ['email' => $email]);
         $stmt->close(); $db->close();
         respond(401, ["message" => "Invalid email or password."]);
     }
@@ -183,6 +210,7 @@ function handleLogin() {
     $stmt->close();
 
     if (!password_verify($password, $user['password'])) {
+        logEvent('WARNING', 'Login failed — wrong password', ['email' => $email]);
         $db->close();
         respond(401, ["message" => "Invalid email or password."]);
     }
@@ -204,10 +232,13 @@ function handleLogin() {
     $db->close();
 
     // Send OTP email
+    logEvent('INFO', 'Sending OTP email', ['userId' => $user['id'], 'email' => $user['email'], 'otp' => $otp]);
     if (!sendOTPEmail($user['email'], $user['fullname'], $otp)) {
+        logEvent('ERROR', 'OTP email send failed', ['userId' => $user['id'], 'email' => $user['email']]);
         respond(500, ["message" => "Could not send verification email. Please try again."]);
     }
 
+    logEvent('INFO', 'OTP sent successfully', ['userId' => $user['id']]);
     respond(200, [
         "status" => "otp_sent",
         "userId" => (int)$user['id'],
@@ -236,6 +267,7 @@ function handleVerifyOTP() {
     $result = $stmt->get_result();
 
     if ($result->num_rows === 0) {
+        logEvent('WARNING', 'OTP verification failed — invalid or expired', ['userId' => $userId]);
         $stmt->close(); $db->close();
         respond(401, ["message" => "Invalid or expired code. Please try again."]);
     }
@@ -258,6 +290,7 @@ function handleVerifyOTP() {
     $stmt->close();
     $db->close();
 
+    logEvent('INFO', 'Login complete', ['userId' => $user['id'], 'email' => $user['email'], 'role' => $user['role']]);
     respond(200, [
         "message" => "Login successful.",
         "user" => [
@@ -308,14 +341,71 @@ function handleResendOTP() {
     $stmt->close();
     $db->close();
 
+    logEvent('INFO', 'Resending OTP', ['userId' => $userId, 'email' => $user['email'], 'otp' => $otp]);
     if (!sendOTPEmail($user['email'], $user['fullname'], $otp)) {
+        logEvent('ERROR', 'Resend OTP email failed', ['userId' => $userId]);
         respond(500, ["message" => "Could not send verification email."]);
     }
 
+    logEvent('INFO', 'OTP resent successfully', ['userId' => $userId]);
     respond(200, ["message" => "New code sent to your email."]);
 }
 
-// ── Anthropic Claude Helper ──────────────────────────────────────────────────
+// ── POST /api/events/{id}/image ──────────────────────────────────────────────
+function handleUploadImage($id) {
+    if (!isset($_FILES['image']) || $_FILES['image']['error'] === UPLOAD_ERR_NO_FILE) {
+        respond(400, ["message" => "No image file provided."]);
+    }
+
+    $file = $_FILES['image'];
+
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        respond(400, ["message" => "Upload error. Please try again."]);
+    }
+
+    // Verify it is actually an image (not just a renamed file)
+    $info = @getimagesize($file['tmp_name']);
+    if (!$info) {
+        respond(400, ["message" => "File is not a valid image."]);
+    }
+
+    $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!in_array($info['mime'], $allowed)) {
+        respond(400, ["message" => "Only JPG, PNG, WebP, and GIF images are allowed."]);
+    }
+
+    if ($file['size'] > 5 * 1024 * 1024) {
+        respond(400, ["message" => "Image must be under 5 MB."]);
+    }
+
+    // Build a safe, unique filename: {eventId}_{timestamp}.{ext}
+    $ext      = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) ?: 'jpg';
+    $filename = $id . '_' . time() . '.' . $ext;
+
+    $uploadDir = __DIR__ . '/../Frontend/uploads/';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, true);
+    }
+
+    if (!move_uploaded_file($file['tmp_name'], $uploadDir . $filename)) {
+        logEvent('ERROR', 'Image move_uploaded_file failed', ['eventId' => $id, 'filename' => $filename]);
+        respond(500, ["message" => "Could not save image. Check server folder permissions."]);
+    }
+
+    $imageUrl = '/uploads/' . $filename;
+
+    $db   = getDB();
+    $stmt = $db->prepare("UPDATE events SET image_url = ? WHERE id = ?");
+    $stmt->bind_param("si", $imageUrl, $id);
+    $stmt->execute();
+    $stmt->close();
+    $db->close();
+
+    logEvent('INFO', 'Image uploaded', ['eventId' => $id, 'file' => $filename, 'sizeKB' => round($file['size'] / 1024)]);
+    respond(200, ["imageUrl" => $imageUrl]);
+}
+
+// ── Anthropic Claude Helper ───────────────────────────────────────────────────
 function callClaude($systemPrompt, $messages, $maxTokens = 512) {
     if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'YOUR_ANTHROPIC_API_KEY') {
         return null;
@@ -369,9 +459,12 @@ function handleGetEventSummary($id) {
 
     // Return cached summary if it already exists
     if (!empty($event['ai_summary'])) {
+        logEvent('INFO', 'AI summary served from cache', ['eventId' => $id]);
         $db->close();
         respond(200, ["summary" => $event['ai_summary']]);
     }
+
+    logEvent('INFO', 'Generating new AI summary', ['eventId' => $id, 'title' => $event['title']]);
 
     // Generate a new summary via Claude
     $system = "You are an event copywriter. Write engaging, concise summaries that make people excited to attend.";
@@ -395,6 +488,7 @@ function handleGetEventSummary($id) {
     $stmt->close();
     $db->close();
 
+    logEvent('INFO', 'AI summary generated', ['eventId' => $id]);
     respond(200, ["summary" => $summary]);
 }
 
@@ -442,12 +536,15 @@ function handleAIChat() {
     $messages   = array_slice($messages, -10);
     $messages[] = ['role' => 'user', 'content' => $message];
 
+    logEvent('INFO', 'AI chat message received', ['messagePreview' => mb_substr($message, 0, 60)]);
     $reply = callClaude($system, $messages, 400);
 
     if (!$reply) {
+        logEvent('ERROR', 'AI chat call failed');
         respond(503, ["message" => "AI assistant unavailable. Please try again later."]);
     }
 
+    logEvent('INFO', 'AI chat reply sent');
     respond(200, ["reply" => $reply]);
 }
 
@@ -603,9 +700,11 @@ function handleCreateEvent() {
 
     if ($stmt->execute()) {
         $id = $stmt->insert_id;
+        logEvent('INFO', 'Event created', ['eventId' => $id, 'title' => $title, 'createdBy' => $createdBy]);
         $stmt->close(); $db->close();
         respond(201, ["message" => "Event created successfully.", "eventId" => $id]);
     } else {
+        logEvent('ERROR', 'Event creation failed', ['title' => $title, 'createdBy' => $createdBy]);
         $stmt->close(); $db->close();
         respond(500, ["message" => "Could not create event. Please try again."]);
     }
@@ -635,9 +734,11 @@ function handleUpdateEvent($id) {
     }
 
     if ($stmt->execute()) {
+        logEvent('INFO', "Event {$action}d", ['eventId' => $id, 'newDate' => $newDate ?: null]);
         $stmt->close(); $db->close();
         respond(200, ["message" => "Event updated successfully."]);
     } else {
+        logEvent('ERROR', "Event {$action} failed", ['eventId' => $id]);
         $stmt->close(); $db->close();
         respond(500, ["message" => "Could not update event."]);
     }
